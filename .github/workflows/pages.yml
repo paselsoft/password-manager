@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
 
@@ -28,17 +29,25 @@ jobs:
       - run: npm ci
       - run: node --test tests/web/core.test.mjs
 
-  deploy:
+  # Il caricamento e la pubblicazione stanno in due job separati: se sono nello
+  # stesso job, deploy-pages a volte cerca il pacchetto prima che GitHub lo
+  # registri ("No artifacts named github-pages", actions/deploy-pages#451).
+  build:
     needs: test
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v5
         with:
           path: webapp
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v5

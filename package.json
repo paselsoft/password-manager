@@ -1,0 +1,16 @@
+{
+  "name": "password-manager",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Gestore di password personale: web app su file KeePass (.kdbx) salvato su Dropbox",
+  "scripts": {
+    "vendor": "node scripts/vendor.mjs",
+    "serve": "node scripts/serve.mjs webapp 8080",
+    "test": "node --test tests/web/*.test.mjs"
+  },
+  "devDependencies": {
+    "hash-wasm": "4.13.0",
+    "kdbxweb": "2.1.1"
+  }
+}

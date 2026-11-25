@@ -1,137 +1,172 @@
-# Migrazione da 1Password 7: verifica e conversione dell'export `.1pif`
+# Cassaforte: gestore di password personale
 
-`onepif_tool.py` legge l'export `.1pif` di 1Password 7 e fa tre cose:
+Web app per le tue password, usabile da qualunque browser (iMac, Linux, PC dell'ufficio,
+iPhone, iPad) senza installare nulla. I dati stanno in **un file KeePass (`.kdbx`) su
+Dropbox** e vengono cifrati e decifrati **solo sul dispositivo**: né Dropbox né il sito che
+ospita l'app vedono mai le password in chiaro.
 
-1. **verifica**: conta gli elementi per tipo, controlla i TOTP (2FA), segnala doppioni,
-   password riutilizzate o deboli, login senza URL e il cestino. Il report **non** contiene
-   password, segreti o note.
-2. **converti**: crea in un colpo solo i file di import per entrambe le strade:
-   - `bitwarden_import.json`: Bitwarden, Vaultwarden (e anche KeePassXC 2.8+);
-   - `keepass_import.xml`: KeePassXC tramite `keepassxc-cli import`, che produce un `.kdbx`
-     apribile poi da KeePassium o Strongbox su iPhone e iPad.
-3. **confronta**: dopo l'import, confronta l'originale con un export del nuovo gestore
-   (titolo + utente + password + presenza del TOTP, per ogni elemento).
+Il formato è quello standard di KeePass, quindi lo stesso file si apre anche con
+**KeePassXC** (Windows, Linux, macOS) e **KeePassium** o **Strongbox** (iPhone e iPad). Se un
+giorno non vuoi più usare questa app, non perdi nulla.
 
-Basta Python 3.6 o successivo, solo libreria standard. Lo script è stato provato con
-KeePassXC 2.7.6 (import reale, generazione dei codici TOTP, export e confronto).
-
-## Cosa viene convertito
-
-| 1Password 7 | Bitwarden | KeePassXC (.kdbx) |
-|---|---|---|
-| Login, Password | Login (URL multipli) | Voce: URL aggiuntivi come `KP2A_URL_n` |
-| TOTP | campo TOTP (il primo valido; gli altri diventano campi nascosti) | attributo `otp` (otpauth://) |
-| Campi personalizzati / sezioni | campi personalizzati (nascosti se "concealed") | attributi (protetti se "concealed") |
-| Storico password | `passwordHistory` | cronologia della voce |
-| Carta di credito | Carta | voce con attributi (numero e CVV protetti) |
-| Identità | Identità | voce con attributi |
-| Nota sicura | Nota sicura | voce nel gruppo "Note sicure" |
-| Server, Database, Email, Router… | Login se c'è utente/password/TOTP, altrimenti Nota | voce |
-| Cartelle (anche annidate) | cartelle `Padre/Figlio` | gruppi |
-| Tag, Preferiti | campo "Tag 1Password", preferito | Tag (+ "Preferito") |
-| Cestino | escluso (opzione `--includi-cestino`) | escluso |
-| **Allegati** | **non presenti nel .1pif: vanno salvati e ricaricati a mano** | idem |
-
-## Procedura
-
-### 0. Preparazione (su iMac High Sierra)
-
-- Python 3: il Python di sistema di High Sierra è il 2.7 e **non va bene**. Installa
-  il pacchetto "macOS 64-bit universal2 installer" da python.org, scegliendo una versione
-  che indichi compatibilità con macOS 10.13 (lo dice la nota accanto al download).
-- Crea una cartella **locale e non sincronizzata** (non iCloud Drive, Dropbox, OneDrive), ad esempio:
-
-```bash
-mkdir -m 700 ~/migrazione-1p
+```
+ browser (iMac / Linux / Windows / iPhone / iPad)
+   └─ Cassaforte: decifra in locale (Argon2id + AES/ChaCha20, formato KDBX 4)
+        └─ Dropbox API ──► Dropbox/App/<nome app>/Password.kdbx   (sempre cifrato)
 ```
 
-- Copia `onepif_tool.py` in quella cartella.
+## Cosa fa (versione 0.1)
 
-### 1. Ripristino ed export da 1Password 7
+- Collegamento a Dropbox con OAuth PKCE: nessun server e nessun segreto. L'app può
+  accedere **solo** alla propria cartella `Dropbox/App/<nome app>/` (in inglese `Apps`).
+- Sblocco con password principale ed eventuale **key file** (che può essere ricordato
+  sul dispositivo come secondo fattore, come la "Secret Key" di 1Password).
+- Ricerca istantanea (anche senza accenti e su più parole), filtro per gruppo, cestino.
+- **Codici 2FA (TOTP)** generati nell'app, compatibili con KeePassXC, KeePassium e KeePass.
+- Copia di utente, password e codici con **svuotamento automatico degli appunti**.
+- Creazione e modifica delle voci: generatore di password, campi personalizzati
+  (anche protetti), tag, gruppi, **allegati** (utile per i 7 allegati di 1Password).
+- **Sincronizzazione sicura**: prima di salvare controlla che il file su Dropbox non sia
+  cambiato. Se è stato modificato altrove (un altro dispositivo, KeePassXC), **unisce le
+  modifiche** invece di sovrascriverle.
+- **Funziona offline**: usa l'ultima copia cifrata salvata sul dispositivo; le modifiche
+  fatte offline restano in attesa (cifrate) e partono al ritorno della rete.
+- **Blocco automatico** dopo inattività (configurabile), e se vuoi anche quando l'app va in
+  secondo piano.
+- Aggiornamento con un clic dei file vecchi (KDBX 3.1 / AES-KDF) a **KDBX 4 + Argon2id**.
+- Si installa sulla schermata Home di iPhone e iPad come un'app (PWA), con tema chiaro e scuro.
 
-1. 1Password 7, Preferenze, Avanzate: abilita le casseforti locali.
-2. File, Ripristina: scegli il backup `.1p4_zip` (954 elementi, 5 cartelle, 7 allegati).
-3. **Salva a mano i 7 allegati** in `~/migrazione-1p/allegati/` (apri l'elemento, clic
-   destro sull'allegato, Salva). Annotati a quale elemento appartiene ciascuno.
-4. Per **ogni** cassaforte: selezionala, poi File, Esporta, Tutti gli elementi, formato
-   "1Password Interchange File (.1pif)", e salva in `~/migrazione-1p/`, dando al file il nome
-   della cassaforte (es. `Personale.1pif`).
+Limiti di questa versione: niente compilazione automatica nei siti e nelle app (sull'iPhone
+è riservata alle app native: si copia e incolla), niente estensione per il browser, e
+nessun audit di sicurezza indipendente (vedi "Sicurezza" più sotto).
 
-### 2. Verifica
+## Messa in funzione (una volta sola, circa 15 minuti)
+
+### 1. Crea l'app su Dropbox
+
+1. Vai su <https://www.dropbox.com/developers/apps> e scegli **Create app**.
+2. **Scoped access**, poi **App folder** (l'app vedrà solo la propria cartella).
+3. Dai un nome unico, ad esempio `Cassaforte-tuonome`. Su Dropbox comparirà la cartella
+   `App/Cassaforte-tuonome/`.
+4. Scheda **Permissions**: attiva `files.metadata.read`, `files.content.read` e
+   `files.content.write`, poi premi **Submit**.
+5. Scheda **Settings**:
+   - in **OAuth 2, Redirect URIs** aggiungi l'indirizzo esatto dell'app, ad esempio
+     `https://paselsoft.github.io/password-manager/` (con la `/` finale). Per le prove in
+     locale aggiungi anche `http://localhost:8080/`;
+   - **Allow public clients (Implicit Grant & PKCE)**: lascia **Allow**;
+   - copia la **App key**. Non è un segreto; l'*App secret* invece non serve e non va
+     usato da nessuna parte.
+
+L'app può restare in stato "Development": per l'uso personale non serve chiedere a Dropbox
+il passaggio in produzione.
+
+### 2. Pubblica il sito su GitHub Pages
+
+1. Facoltativo: inserisci la App key in `webapp/config.js` (`dropboxAppKey: '...'`),
+   così non dovrai digitarla su ogni dispositivo.
+2. Sul repository GitHub: **Settings, Pages, Build and deployment, Source: GitHub Actions**.
+3. Pubblica il contenuto su un branch `main` (il workflow `.github/workflows/pages.yml`
+   esegue i test e pubblica `webapp/` a ogni push su `main`). In alternativa avvialo a mano
+   da **Actions, Pubblica web app, Run workflow**.
+4. L'indirizzo sarà `https://<utente>.github.io/password-manager/`: deve coincidere con il
+   Redirect URI impostato su Dropbox.
+
+Va bene anche qualsiasi altro hosting statico HTTPS (Cloudflare Pages, Netlify…): basta
+pubblicare la cartella `webapp/` così com'è, senza passaggi di build.
+
+### 3. Primo avvio
+
+1. Apri l'indirizzo, inserisci la App key (se non è in `config.js`) e premi **Collega Dropbox**.
+2. Scegli il file `.kdbx`, oppure **Carica un .kdbx dal dispositivo**, oppure **Crea nuovo
+   database**. Per portare dentro le password di 1Password segui
+   [docs/MIGRAZIONE-1PASSWORD.md](docs/MIGRAZIONE-1PASSWORD.md).
+3. Se compare l'avviso "protezione datata", premi **Aggiorna ora**.
+
+### iPhone e iPad
+
+Apri l'indirizzo in Safari, poi Condividi, **Aggiungi alla schermata Home**. L'app installata
+ha un suo spazio separato da Safari, quindi va collegata a Dropbox una volta anche lì. Se
+dopo l'autorizzazione Dropbox non torna all'app, usa **Collega con codice** (sotto il
+pulsante principale): autorizzi, copi il codice e lo incolli nell'app.
+
+### iMac con High Sierra
+
+Usa la versione più recente di Firefox ESR disponibile per macOS 10.13: Chrome e Safari su
+High Sierra non ricevono più aggiornamenti di sicurezza, e anche il supporto di Firefox per
+High Sierra è a fine vita. Un browser senza aggiornamenti è il punto debole di qualsiasi
+gestore di password su quella macchina.
+
+### PC dell'ufficio (Windows 10)
+
+Basta il browser, nessuna installazione. Imposta un blocco automatico breve (1-2 minuti)
+dalle impostazioni e **non** spuntare "Ricorda il key file" su un computer condiviso.
+
+## Uso insieme a KeePassXC e KeePassium
+
+- **KeePassXC** (Linux, Windows): apri il file dalla cartella Dropbox sincronizzata
+  (`Dropbox/App/<nome app>/Password.kdbx`). KeePassXC si accorge dei cambiamenti fatti
+  dall'app web e li ricarica.
+- **KeePassium** (iPhone, iPad): apri il file da app File, Dropbox. In più hai la
+  compilazione automatica di iOS (la versione gratuita gestisce un database).
+- Se due dispositivi modificano il file nello stesso momento, Cassaforte unisce le modifiche.
+  KeePassXC fa lo stesso quando ricarica. Evita però di tenere il file aperto con
+  modifiche non salvate su più programmi a lungo.
+
+## Sicurezza: cosa protegge e cosa no
+
+- **Protegge da**: furto o fuga del file da Dropbox (senza password e key file è
+  inutilizzabile; Argon2id rende lenti i tentativi), accesso di Dropbox ai dati, perdita
+  del telefono (blocco automatico, nessun dato in chiaro salvato sul dispositivo).
+- **Il punto delicato di ogni web app**: il codice arriva dal sito a ogni apertura. Se
+  qualcuno prendesse il controllo del tuo account GitHub potrebbe pubblicare una versione
+  modificata. Quindi: **attiva la verifica in due passaggi su GitHub e su Dropbox** e usa
+  una password principale lunga (frase di 5-6 parole).
+- Un dispositivo compromesso (virus, estensioni malevole del browser) può leggere ciò che
+  vedi. Vale per qualsiasi gestore di password.
+- Il codice di crittografia non è scritto da zero: il formato KDBX è gestito da `kdbxweb`
+  (la libreria di KeeWeb) e Argon2 da `hash-wasm`. L'app però non ha avuto un audit
+  indipendente.
+- **Fai backup**: Dropbox conserva le versioni precedenti dei file (cronologia versioni).
+  Tieni comunque, ogni tanto, una copia del `.kdbx` su una chiavetta, e un foglio con la
+  password principale in un posto sicuro.
+
+## Sviluppo e test
+
+Requisiti: Node.js 18+ (per i test). L'app in sé non ha passaggi di build.
 
 ```bash
-cd ~/migrazione-1p
+npm install
 ```
 
 ```bash
-python3 onepif_tool.py verifica Personale.1pif --atteso 954 --report report.md
+npm run serve
 ```
 
-Con più casseforti passale tutte insieme (`Personale.1pif Lavoro.1pif …`). Il controllo
-`--atteso` confronta il totale (cestino compreso, cartelle escluse) con i 954 elementi
-dichiarati dal backup. Leggi il report: se vuoi, elimina doppioni e voci inutili in 1Password 7,
-poi esporta di nuovo.
-
-### 3. Conversione
+Apre l'app su `http://localhost:8080/` (localhost conta come contesto sicuro, quindi
+WebCrypto e service worker funzionano).
 
 ```bash
-python3 onepif_tool.py converti *.1pif --atteso 954 --out ~/migrazione-1p/out
+npm test
 ```
 
-Con più casseforti, il nome della cassaforte diventa la cartella o il gruppo di primo livello
-(`--senza-cassaforte` per evitarlo).
+I test coprono TOTP (vettori ufficiali RFC 6238), generatore, lettura e scrittura KDBX,
+unione di modifiche concorrenti e compatibilità reale con `keepassxc-cli` (se installato).
+Nel browser, con Playwright e un Dropbox simulato, verificano sblocco, ricerca, modifica,
+conflitti, lavoro offline, cestino e aggiornamento della protezione.
 
-### 4a. Import in Bitwarden o Vaultwarden
+`npm run vendor` ricopia in `webapp/vendor/` le librerie (`kdbxweb`, `hash-wasm`) dopo un
+aggiornamento delle dipendenze.
 
-Web Vault, Strumenti, Importa dati, formato **"Bitwarden (json)"**, file `out/bitwarden_import.json`.
-Poi ricarica i 7 allegati (Premium) oppure conservali altrove.
+### Struttura
 
-### 4b. Import in KeePassXC
-
-```bash
-keepassxc-cli import -p out/keepass_import.xml ~/Passwords.kdbx
-```
-
-Su Mac il comando si trova dentro l'app: `/Applications/KeePassXC.app/Contents/MacOS/keepassxc-cli`.
-Su Linux e Windows è installato insieme a KeePassXC. Scegli una password principale robusta
-quando la chiede. Gli allegati si aggiungono dalla scheda "Avanzate" della voce.
-In alternativa, KeePassXC 2.8+ importa direttamente `bitwarden_import.json`
-(Database, Importa, Bitwarden).
-
-### 5. Verifica dopo l'import
-
-Esporta dal nuovo gestore e confronta:
-
-- **Bitwarden**: Strumenti, Esporta cassaforte, formato `.json` (**non** "json crittografato").
-- **KeePassXC**: esporta in XML con il comando qui sotto.
-
-```bash
-keepassxc-cli export -f xml ~/Passwords.kdbx > verifica.xml
-```
-
-```bash
-python3 onepif_tool.py confronta *.1pif --con verifica.xml
-```
-
-L'esito deve essere `TUTTO CORRISPONDE`; se non lo è, controlla gli elementi elencati.
-Prova anche a mano 3 o 4 TOTP, confrontando il codice con quello di 1Password 7.
-
-### 6. Pulizia (importante)
-
-I `.1pif`, i file in `out/` e gli export di verifica contengono **tutte le password in chiaro**.
-
-```bash
-rm -rf ~/migrazione-1p/*.1pif ~/migrazione-1p/out ~/migrazione-1p/verifica.* ~/migrazione-1p/report.md
-```
-
-Svuota poi il Cestino del Mac. Tieni da parte, in un posto sicuro, il backup
-`.1p4_zip` originale (è cifrato) finché non sei certo della migrazione.
-
-## Test
-
-```bash
-python3 -m unittest discover -s tests -v
-```
-
-`tests/fixtures/esempio.1pif` contiene solo dati inventati. Se `keepassxc-cli` è installato,
-i test fanno anche un import reale in KeePassXC e controllano la generazione del codice TOTP.
+| Percorso | Contenuto |
+|---|---|
+| `webapp/` | la web app pubblicata (HTML, CSS, JS, librerie, service worker) |
+| `webapp/js/vault.js` | apertura, ricerca, modifica e unione dei database KDBX |
+| `webapp/js/dropbox.js` | OAuth PKCE e API Dropbox (download e upload con controllo di revisione) |
+| `webapp/js/totp.js`, `generator.js` | codici 2FA e generatore di password |
+| `webapp/js/store.js` | IndexedDB: copia cifrata offline, modifiche in attesa, key file |
+| `webapp/js/app.js` | interfaccia |
+| `onepif_tool.py` | verifica e conversione dell'export di 1Password 7 ([guida](docs/MIGRAZIONE-1PASSWORD.md)) |
+| `tests/` | test Python (strumento di migrazione) e Node/Playwright (web app) |

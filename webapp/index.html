@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' https://api.dropboxapi.com https://content.dropboxapi.com; img-src 'self' data: blob:; style-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="theme-color" content="#1f5f8b">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Cassaforte">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <title>Cassaforte</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/app.css">
+  <script src="config.js"></script>
+  <script src="vendor/kdbxweb.min.js"></script>
+  <script src="vendor/argon2.umd.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <noscript><p class="pad">Questa applicazione richiede JavaScript.</p></noscript>
+
+  <!-- Configurazione e collegamento Dropbox -->
+  <section id="screen-setup" class="screen center" hidden>
+    <div class="card narrow">
+      <h1 class="brand"><img src="icons/icon.svg" alt="" width="40" height="40"> Cassaforte</h1>
+      <p class="muted">Le tue password, cifrate sul dispositivo, in un file KeePass (.kdbx) su Dropbox.</p>
+
+      <form id="form-appkey" hidden>
+        <label for="appkey">App key Dropbox</label>
+        <input id="appkey" autocomplete="off" autocapitalize="off" spellcheck="false" required placeholder="es. abc123xyz456def">
+        <p class="hint">La trovi nella console sviluppatori Dropbox, nella pagina dell'app che hai creato (vedi istruzioni nel README).</p>
+        <button class="primary" type="submit">Salva</button>
+      </form>
+
+      <div id="connect-box" hidden>
+        <button id="btn-connect" class="primary wide" type="button">Collega Dropbox</button>
+        <details class="mt">
+          <summary>Su iPhone o iPad il collegamento non torna all'app?</summary>
+          <p class="hint">Usa il collegamento con codice: si apre Dropbox, autorizzi, copi il codice e lo incolli qui.</p>
+          <button id="btn-connect-code" type="button">Apri Dropbox e ottieni un codice</button>
+          <form id="form-code" class="row mt" hidden>
+            <input id="auth-code" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Incolla il codice" required>
+            <button class="primary" type="submit">Conferma</button>
+          </form>
+        </details>
+        <p class="hint mt"><a href="#" id="link-change-appkey">Cambia app key</a></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Scelta del database -->
+  <section id="screen-files" class="screen center" hidden>
+    <div class="card narrow">
+      <h2>Scegli il database</h2>
+      <p class="hint">File .kdbx nella cartella dell'app su Dropbox (Dropbox / App / nome della tua app).</p>
+      <ul id="file-list" class="file-list"></ul>
+      <div class="row wrap mt">
+        <button id="btn-refresh-files" type="button">Aggiorna elenco</button>
+        <label class="button" for="upload-kdbx">Carica un .kdbx dal dispositivo</label>
+        <input id="upload-kdbx" type="file" accept=".kdbx,application/octet-stream" class="visually-hidden">
+        <button id="btn-new-db" type="button">Crea nuovo database</button>
+      </div>
+      <p class="hint mt"><a href="#" id="link-disconnect-files">Scollega Dropbox</a></p>
+    </div>
+  </section>
+
+  <!-- Sblocco -->
+  <section id="screen-unlock" class="screen center" hidden>
+    <form id="form-unlock" class="card narrow" autocomplete="off">
+      <h1 class="brand"><img src="icons/icon.svg" alt="" width="40" height="40"> <span id="unlock-name">Database</span></h1>
+      <p id="unlock-path" class="hint"></p>
+      <label for="master">Password principale</label>
+      <div class="input-group">
+        <input id="master" type="password" autocomplete="current-password" autocapitalize="off" spellcheck="false">
+        <button type="button" class="icon" data-toggle-visibility="master" aria-label="Mostra password">👁</button>
+      </div>
+      <div class="keyfile">
+        <span>Key file:</span>
+        <span id="keyfile-name" class="muted">nessuno</span>
+        <label class="button small" for="keyfile-input">Scegli…</label>
+        <input id="keyfile-input" type="file" class="visually-hidden">
+        <button id="btn-keyfile-clear" type="button" class="small" hidden>Rimuovi</button>
+      </div>
+      <label class="check"><input id="keyfile-remember" type="checkbox" checked> Ricorda il key file su questo dispositivo</label>
+      <button id="btn-unlock" class="primary wide" type="submit">Sblocca</button>
+      <p id="unlock-msg" class="msg" role="alert"></p>
+      <p class="hint"><a href="#" id="link-change-db">Cambia database</a></p>
+    </form>
+  </section>
+
+  <!-- Applicazione -->
+  <section id="screen-main" class="screen" hidden>
+    <header class="topbar">
+      <button id="btn-lock" type="button" class="icon" aria-label="Blocca" title="Blocca">🔒</button>
+      <div class="title">
+        <strong id="db-name">Database</strong>
+        <span id="sync-status" class="pill">—</span>
+      </div>
+      <button id="btn-sync" type="button" class="icon" aria-label="Sincronizza" title="Sincronizza">⟳</button>
+      <button id="btn-settings" type="button" class="icon" aria-label="Impostazioni" title="Impostazioni">⚙</button>
+    </header>
+    <div id="banner" class="banner" hidden></div>
+    <div class="layout">
+      <div class="list-pane">
+        <div class="toolbar">
+          <input id="search" type="search" placeholder="Cerca titolo, utente, sito, note…" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Cerca">
+          <div class="row">
+            <select id="group-filter" aria-label="Gruppo"></select>
+            <button id="btn-new-entry" class="primary" type="button">+ Nuova</button>
+          </div>
+        </div>
+        <p id="list-count" class="hint pad-x"></p>
+        <ul id="entry-list" class="entry-list"></ul>
+      </div>
+      <article id="detail" class="detail-pane" aria-live="polite">
+        <p class="muted empty">Seleziona una voce.</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- Modifica voce -->
+  <dialog id="dlg-entry">
+    <form id="form-entry" method="dialog" autocomplete="off">
+      <h2 id="entry-dlg-title">Voce</h2>
+      <label for="f-title">Titolo</label>
+      <input id="f-title" required>
+      <label for="f-username">Utente</label>
+      <input id="f-username" autocapitalize="off" spellcheck="false">
+      <label for="f-password">Password</label>
+      <div class="input-group">
+        <input id="f-password" type="password" autocapitalize="off" spellcheck="false" autocomplete="new-password">
+        <button type="button" class="icon" data-toggle-visibility="f-password" aria-label="Mostra password">👁</button>
+        <button type="button" id="btn-gen" class="icon" aria-label="Genera password" title="Genera password">🎲</button>
+      </div>
+      <div id="gen-box" class="gen-box" hidden>
+        <label>Lunghezza <output id="gen-len-out">20</output><input id="gen-len" type="range" min="8" max="64" value="20"></label>
+        <div class="row wrap">
+          <label class="check"><input id="gen-upper" type="checkbox" checked> A-Z</label>
+          <label class="check"><input id="gen-lower" type="checkbox" checked> a-z</label>
+          <label class="check"><input id="gen-digits" type="checkbox" checked> 0-9</label>
+          <label class="check"><input id="gen-symbols" type="checkbox" checked> simboli</label>
+          <button type="button" id="btn-gen-again">Rigenera</button>
+        </div>
+      </div>
+      <label for="f-url">Sito (URL)</label>
+      <input id="f-url" type="text" inputmode="url" autocapitalize="off" spellcheck="false" placeholder="https://…">
+      <label for="f-otp">Codice 2FA (TOTP)</label>
+      <input id="f-otp" autocapitalize="off" spellcheck="false" placeholder="Segreto Base32 oppure otpauth://totp/…">
+      <label for="f-group">Gruppo</label>
+      <select id="f-group"></select>
+      <label for="f-tags">Tag (separati da virgola)</label>
+      <input id="f-tags" autocapitalize="off">
+      <label for="f-notes">Note</label>
+      <textarea id="f-notes" rows="4"></textarea>
+      <fieldset>
+        <legend>Campi personalizzati</legend>
+        <div id="f-fields"></div>
+        <button type="button" id="btn-add-field" class="small">+ Aggiungi campo</button>
+      </fieldset>
+      <p id="entry-msg" class="msg" role="alert"></p>
+      <div class="row end">
+        <button type="button" id="btn-entry-cancel">Annulla</button>
+        <button type="submit" class="primary" id="btn-entry-save">Salva</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Nuovo database -->
+  <dialog id="dlg-newdb">
+    <form id="form-newdb" method="dialog" autocomplete="off">
+      <h2>Nuovo database</h2>
+      <label for="n-name">Nome file</label>
+      <input id="n-name" value="Password" required>
+      <label for="n-pass">Password principale</label>
+      <input id="n-pass" type="password" autocomplete="new-password" required minlength="12">
+      <label for="n-pass2">Ripeti password</label>
+      <input id="n-pass2" type="password" autocomplete="new-password" required minlength="12">
+      <p class="hint">Almeno 12 caratteri. Se la dimentichi, i dati non sono recuperabili da nessuno.</p>
+      <p id="newdb-msg" class="msg" role="alert"></p>
+      <div class="row end">
+        <button type="button" id="btn-newdb-cancel">Annulla</button>
+        <button type="submit" class="primary">Crea</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Impostazioni -->
+  <dialog id="dlg-settings">
+    <form id="form-settings" method="dialog">
+      <h2>Impostazioni</h2>
+      <label for="s-autolock">Blocco automatico dopo</label>
+      <select id="s-autolock">
+        <option value="1">1 minuto</option>
+        <option value="2">2 minuti</option>
+        <option value="5">5 minuti</option>
+        <option value="10">10 minuti</option>
+        <option value="15">15 minuti</option>
+        <option value="30">30 minuti</option>
+      </select>
+      <label for="s-clip">Svuota appunti dopo</label>
+      <select id="s-clip">
+        <option value="15">15 secondi</option>
+        <option value="30">30 secondi</option>
+        <option value="60">60 secondi</option>
+        <option value="0">mai</option>
+      </select>
+      <label class="check"><input id="s-lockhidden" type="checkbox"> Blocca subito quando l'app va in secondo piano</label>
+      <h3>File</h3>
+      <p id="s-fileinfo" class="hint"></p>
+      <button type="button" id="btn-upgrade" hidden>Aggiorna la protezione a KDBX 4 + Argon2id</button>
+      <h3>Dispositivo</h3>
+      <div class="row wrap">
+        <button type="button" id="btn-change-db">Cambia database</button>
+        <button type="button" id="btn-forget-local">Cancella dati locali</button>
+        <button type="button" id="btn-disconnect" class="danger">Scollega Dropbox</button>
+      </div>
+      <p class="hint" id="s-version"></p>
+      <div class="row end">
+        <button type="submit" class="primary">Chiudi</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="busy" class="busy" hidden><div class="spinner"></div><p id="busy-msg">Attendere…</p></div>
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>

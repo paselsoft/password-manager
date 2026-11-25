@@ -1,0 +1,16 @@
+# Mai committare export o database reali: contengono password in chiaro
+*.1pif
+!tests/fixtures/*.1pif
+*.1pux
+*.1p4_zip
+*.opvault
+*.kdbx
+*.csv
+bitwarden_import.json
+keepass_import.xml
+report_verifica.md
+export*/
+out/
+__pycache__/
+*.pyc
+.DS_Store
